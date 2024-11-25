@@ -3,3 +3,6 @@ Flask
 Flask-SQLAlchemy 
 Flask-WTF 
 Werkzeug
+opencv-python
+scikit-learn
+pandas

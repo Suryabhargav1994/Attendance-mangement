@@ -10,6 +10,7 @@ import joblib
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# subject = "english"
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///usersdb.db'  # SQLite database file
@@ -24,6 +25,12 @@ class User(db.Model):
     password = db.Column(db.String(128), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
 
+
+class Organization(db.Model):
+    
+    id = db.Column(db.Integer, primary_key=True)  # Auto-increment primary key
+    name = db.Column(db.String(100), nullable=False)  # Organization name
+    userid = db.Column(db.Integer, nullable=False) 
 # Create database tables
 with app.app_context():
     db.create_all()
@@ -39,15 +46,15 @@ datetoday2 = date.today().strftime("%d-%B-%Y")
 face_detector = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 
 
-if not os.path.isdir('Attendance'):
-    os.makedirs('Attendance')
-if not os.path.isdir('static'):
-    os.makedirs('static')
-if not os.path.isdir('static/faces'):
-    os.makedirs('static/faces')
-if f'Attendance-{datetoday}.csv' not in os.listdir('Attendance'):
-    with open(f'Attendance/Attendance-{datetoday}.csv', 'w') as f:
-        f.write('Name,Roll,Time')
+# if not os.path.isdir('Attendance'):
+#     os.makedirs('Attendance')
+# if not os.path.isdir('static'):
+#     os.makedirs('static')
+# if not os.path.isdir('static/faces'):
+#     os.makedirs('static/faces')
+# if f'Attendance-{subject}-{datetoday}.csv' not in os.listdir('Attendance'):
+#     with open(f'Attendance/Attendance-{subject}-{datetoday}.csv', 'w') as f:
+#         f.write('Name,Roll,Time')
 
 def totalreg():
     return len(os.listdir('static/faces'))
@@ -80,24 +87,24 @@ def train_model():
     knn.fit(faces, labels)
     joblib.dump(knn, 'static/face_recognition_model.pkl')
 
-def extract_attendance():
-    df = pd.read_csv(f'Attendance/Attendance-{datetoday}.csv')
+def extract_attendance(subject):
+    df = pd.read_csv(f'Attendance/Attendance-{subject}-{datetoday}.csv')
     names = df['Name']
     rolls = df['Roll']
     times = df['Time']
     l = len(df)
     return names, rolls, times, l
 
-def add_attendance(name):
+def add_attendance(name, subject):
     print(name)
     username = name.split('_')[0]
     userid = name.split('_')[1]
     current_time = datetime.now().strftime("%H:%M:%S")
 
-    df = pd.read_csv(f'Attendance/Attendance-{datetoday}.csv')
+    df = pd.read_csv(f'Attendance/Attendance-{subject}-{datetoday}.csv')
     print(userid)
     if int(userid) not in list(df['Roll']):
-        with open(f'Attendance/Attendance-{datetoday}.csv', 'a') as f:
+        with open(f'Attendance/Attendance-{subject}-{datetoday}.csv', 'a') as f:
             f.write(f'\n{username},{userid},{current_time}')
 
 def getallusers():
@@ -121,13 +128,27 @@ def home():
 
 @app.route('/start', methods=['GET'])
 def start():
-    names, rolls, times, l = extract_attendance()
+    global subject
+    subject = request.args.get('subject')
+    # subject = "cse"
+
+    if not os.path.isdir('Attendance'):
+        os.makedirs('Attendance')
+    if not os.path.isdir('static'):
+        os.makedirs('static')
+    if not os.path.isdir('static/faces'):
+        os.makedirs('static/faces')
+    if f'Attendance-{subject}-{datetoday}.csv' not in os.listdir('Attendance'):
+        with open(f'Attendance/Attendance-{subject}-{datetoday}.csv', 'w') as f:
+            f.write('Name,Roll,Time')
+    names, rolls, times, l = extract_attendance(subject)
 
     if 'face_recognition_model.pkl' not in os.listdir('static'):
         return render_template('home.html', names=names, rolls=rolls, times=times, l=l, totalreg=totalreg(), datetoday2=datetoday2, mess='There is no trained model in the static folder. Please add a new face to continue.')
 
     ret = True
     cap = cv2.VideoCapture(0)
+    
     while ret:
         ret, frame = cap.read()
         if len(extract_faces(frame)) > 0:
@@ -136,7 +157,7 @@ def start():
             cv2.rectangle(frame, (x, y), (x+w, y-40), (86, 32, 251), -1)
             face = cv2.resize(frame[y:y+h, x:x+w], (50, 50))
             identified_person = identify_face(face.reshape(1, -1))[0]
-            add_attendance(identified_person)
+            add_attendance(identified_person, subject)
             cv2.rectangle(frame, (x,y), (x+w, y+h), (0,0,255), 1)
             cv2.rectangle(frame,(x,y),(x+w,y+h),(50,50,255),2)
             cv2.rectangle(frame,(x,y-40),(x+w,y),(50,50,255),-1)
@@ -148,17 +169,19 @@ def start():
             break
     cap.release()
     cv2.destroyAllWindows()
-    names, rolls, times, l = extract_attendance()
+    names, rolls, times, l = extract_attendance(subject)
     user_data = []
     for i in range(len(names)):
         user_data.append({"name": names[i], "rolls": int(rolls[i]), "times": times[i]})
     print(user_data, "testing")
-    # return jsonify({
-    #     "status": 200,
-    #     "message": "attendace has taken", 
-    #     "data": user_data
-    # })
-    return render_template('home.html', names=names, rolls=rolls, times=times, l=l, totalreg=totalreg(), datetoday2=datetoday2)
+
+    final_data = {"subject": subject, "attendance":user_data}
+    return jsonify({
+        "status": 200,
+        "message": "attendace has taken", 
+        "data": final_data
+    })
+    # return render_template('home.html', names=names, rolls=rolls, times=times, l=l, totalreg=totalreg(), datetoday2=datetoday2)
 
 
 
@@ -192,11 +215,11 @@ def add():
     cv2.destroyAllWindows()
     print('Training Model')
     train_model()
-    names, rolls, times, l = extract_attendance()
-    # return jsonify({
-    #     "status": 200
-    # })
-    return render_template('home.html', names=names, rolls=rolls, times=times, l=l, totalreg=totalreg(), datetoday2=datetoday2)
+    # names, rolls, times, l = extract_attendance(subject)
+    return jsonify({
+        "status": 200
+    })
+    # return render_template('home.html', names=names, rolls=rolls, times=times, l=l, totalreg=totalreg(), datetoday2=datetoday2)
 
 
 
@@ -250,6 +273,23 @@ def delete_user(id):
 
     return jsonify({"message": "User deleted successfully!"}), 200
 
+@app.route('/add_organization', methods=['POST'])
+def add_organization():
+    data = request.get_json()
+    orgname = data['org_name']
+    user_id = data['user_id']
+    new_org = Organization(name= orgname, userid=user_id)
+    db.session.add(new_org)
+    db.session.commit()
+    return jsonify({"status": 200, "message": "organization has registered succesful", "data": None}), 200
+
+@app.route('/organizations', methods=['POST'])
+def get_organizations():
+    data = request.get_json()
+    user_id = data['user_id']
+    organizations = Organization.query.filter_by(userid=user_id)
+    return [{"id": org.id, "name": org.name, "userid": org.userid} for org in organizations]
 
 if __name__ == '__main__':
     app.run(debug=True)
+
